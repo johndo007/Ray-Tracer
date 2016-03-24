@@ -1,0 +1,214 @@
+Johnny Do
+861003761
+CS 130
+Dr Shinar Tamar
+Fall 2015
+
+Vector_3D<double> Phong_Shader::Shade_Surface(const Ray& ray,const Object& intersection_object,const Vector_3D<double>& intersection_point,const Vector_3D<double>& same_side_normal) const
+  /*
+    I = Ia + Id + Is = Ra * La + Rd * Ld * max(0, 1 * n) + Rs * Ls * pow(max(0, cos(theta)), alpha)
+    I = Color Intensity
+    R = Reflectance
+    L = Illumination
+  */  
+    
+  //Intensity
+  Vector_3D<double> color; 
+  
+  //Calculate color from each light source
+  for(unsigned i = 0; i < world.lights.size(); i++)
+  {
+    Light* currentLight = world.lights[i];
+    Vector_3D<double> currentPosition(currentLight->position);
+    Vector_3D<double> illumination(currentLight->Emitted_Light(ray));
+    Vector_3D<double> intersection(intersection_point + (same_side_normal * intersection_object.small_t));
+
+
+    //Ambient Lighting
+    Vector_3D<double> ambientLight(color_ambient * illumination);
+
+    //Diffuse Lighting
+    Vector_3D<double> L(currentPosition - intersection);
+    L.Normalize();
+    double LN = Vector_3D<double>::Dot_Product(L, same_side_normal);
+    Vector_3D<double> diffuseLight(color_diffuse * illumination * max(0.0, LN));    
+
+    //Specular Lighting
+    
+    //View Direction
+    Vector_3D<double> V(ray.endpoint - intersection);
+    V.Normalize();
+    
+    //Reflected Direction
+    Vector_3D<double> R(((same_side_normal * LN) * 2.0) - L);
+    R.Normalize();
+    
+    double VR = Vector_3D<double>::Dot_Product(V, R);
+    Vector_3D<double> specularLight(color_specular * illumination * pow(max(0.0, VR), specular_power));
+
+    //Shadows are enabled
+    if(world.enable_shadows == true)
+    {
+      Ray shadow(intersection, currentPosition - intersection);
+      for(unsigned j = 0; j < world.objects.size(); j++)
+      {
+        if(world.objects[j]->Intersection(shadow) == false)
+        {
+          //Not sure why this gives the desired color
+          color += diffuseLight + specularLight;
+        }
+      }
+      
+      //Playing around with lighting
+      color += ambientLight * diffuseLight * specularLight;
+    }
+    
+    //Shadows are not enabled
+    else
+    {
+      //Colors are the sum of the ambient, diffuse, and specular lighting
+      color += ambientLight + diffuseLight + specularLight;
+    }
+  }
+  
+  //return the color
+  return color;    
+    
+Vector_3D<double> Reflective_Shader::Shade_Surface(const Ray& ray,const Object& intersection_object,const Vector_3D<double>& intersection_point,const Vector_3D<double>& same_side_normal) const
+  //~ http://paulbourke.net/geometry/reflected/
+  
+  //Base Color for Sphere
+  Vector_3D<double> sphereColor(Phong_Shader::Shade_Surface(ray, intersection_object, intersection_point, same_side_normal));
+  
+  //Adjusting the intersection point so that it doesn't intersect with itself
+  Vector_3D<double> intersection(intersection_point + (same_side_normal * intersection_object.small_t));
+  
+  //Calculating the direction of the intersection
+  Vector_3D<double> intersectionDirection(intersection_point - ray.endpoint);
+  
+  //Finding the reflected ray direction
+  Vector_3D<double> reflectedRayDirection(intersectionDirection - same_side_normal * 2 * Vector_3D<double>::Dot_Product(intersectionDirection, same_side_normal));
+  
+  //A ray just for place holder reasons for a function
+  Ray dummy_ray;
+  
+  //Create ray with intersection we calculated and direction
+  Ray reflectedRay(intersection, reflectedRayDirection);
+  
+  //Cast the ray we created
+  Vector_3D<double> reflectedColor(world.Cast_Ray(reflectedRay, dummy_ray));
+  
+  //Calculate the reflected intensity added to the base intensity
+  Vector_3D<double> color(reflectedColor * reflectivity + sphereColor);
+  
+  return color;    
+
+Vector_3D<double> Sphere::Normal(const Vector_3D<double>& location) const
+    Set the normal ray to be (location - center)
+    Normalized the vector via the Normalize function for vectors
+    Returned the new normlized vector normal
+
+bool Sphere::Intersection(Ray& ray) const
+  Vector_3D<double> cameraView(ray.direction);
+  Vector_3D<double> cameraDirection(ray.endpoint - center);
+  double rSquared = radius * radius;
+
+  double a = Vector_3D<double>::Dot_Product(cameraView, cameraView);
+  double b = 2 * Vector_3D<double>::Dot_Product(cameraView, cameraDirection);
+  double c = Vector_3D<double>::Dot_Product(cameraDirection, cameraDirection) - rSquared;
+  
+  double discriminant = b * b - 4 * a * c;
+  
+  //In case that there are 2 non-real intersections
+  if(discriminant < 0)
+  {
+    return false;
+  }
+  else
+  {
+    //To store the point of closest intersection from Ray-Sphere intersection
+    double t = 0;
+    
+    double intersectionOne = (-1.0 * b + sqrt(discriminant) ) / (2.0 * a);
+    double intersectionTwo = (-1.0 * b - sqrt(discriminant) ) / (2.0 * a);
+    
+    //If IntersectionOne is real but IntersectionTwo is not
+    if(intersectionOne >= 0 && intersectionTwo < 0)
+    { 
+      //Take intersectionOne as new distance t
+      t = intersectionOne;
+    }
+    
+    //If IntersectionTwo is real but IntersectionOne is not
+    else if( intersectionTwo >= 0 && intersectionOne < 0 ) 
+    {
+      //Take intersectionTwo as new distance t
+      t = intersectionTwo;
+    }
+    
+    //If IntersectionOne is real and IntersectionTwo is real
+    else if( intersectionOne >= 0 && intersectionTwo >= 0 ) 
+    {
+      //Take minimum of intersectionOne and intersectionTwo as new distance t
+      t = min(intersectionOne, intersectionTwo);
+    }
+    else
+    {
+      return false;
+    }
+
+    //If there is a closer intersection than the one already set and value is not super small
+    if(ray.semi_infinite == true && t > small_t)
+    {
+      ray.current_object = this;
+      ray.t_max = t;
+      ray.semi_infinite = false;
+      return true;
+    }
+    else if(ray.semi_infinite == false  && t < ray.t_max  && t>small_t)
+    {
+      ray.current_object = this;
+      ray.t_max = t;
+      return true;
+    }    
+    return false;
+  }
+  return false;    
+
+bool Plane::Intersection(Ray& ray) const
+    Calculate the implicit formula for ray-plane intersection
+    Check t and the semi_infinite variable of the ray for intersection
+        Set the current object to the intersection object
+        Set ray t to current t
+        Set semi_infinite to false
+        return true
+    Check for closer intersection
+        Repeat the same procedure as if when we found the first intersection
+    If no intersection at all, return false
+
+Vector_3D<double> Camera::World_Position(const Vector_2D<int>& pixel_index)
+    Find the location of the pixel within the view of the camera grid by using the pixel_index
+    We make the world position of the camera by using the coordinates of what we found and the focal point
+    Return the world position we calculated
+    
+const Object* Render_World::Closest_Intersection(Ray& ray)
+    Find object that are intersected by the ray "ray" via going through the object list 
+        If the ray intersects with an object then 
+            Ray.t_max, ray.current_object, and ray.semi_infinite are set by function Intersection
+    If there is no intersection we return NULL
+    Otherwise return the pointer to the closest object stored in ray.object
+        
+void Render_World::Render_Pixel(const Vector_2D<int>& pixel_index)
+    Set ray start to camera position 
+    Set direction of ray to pixel from camera
+    Set the max distance of the ray to the max value of float
+    Cast the ray onto the world with a dummy ray as a start and ray as the direction
+    Record the color onto the screen grid via set_pixel
+
+Vector_3D<double> Render_World::Cast_Ray(Ray& ray,const Ray& parent_ray)
+    Attempt to find the object closest to the screen or the first object the ray comes into contact with
+    If there are no objects to be found by the ray, we return the default color: black in my case.
+    If there is an object then
+        Take the point of intersection
+        Find the normal to the ray's intersection
+        Return the color that is bounced off of the surface of the object
